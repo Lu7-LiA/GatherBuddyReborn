@@ -1,0 +1,102 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # 03:17 JST. Avoid the start of the hour, when scheduled runs are busiest.
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  Sync:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Personal Branch
+        uses: actions/checkout@v6
+        with:
+          ref: personal/special-nodes
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Merge Upstream
+        id: merge
+        shell: pwsh
+        run: |
+          git remote add upstream https://github.com/FFXIV-CombatReborn/GatherBuddyReborn.git
+          git fetch --no-tags upstream main
+
+          git merge-base --is-ancestor upstream/main HEAD
+          if ($LASTEXITCODE -eq 0) {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "has_update=false"
+            if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+              Add-Content -Path $env:GITHUB_OUTPUT -Value "should_build=true"
+              Write-Host "Already current; running the requested verification build."
+            } else {
+              Add-Content -Path $env:GITHUB_OUTPUT -Value "should_build=false"
+              Write-Host "Already current; nothing to do."
+            }
+            exit 0
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit upstream/main
+          if ($LASTEXITCODE -ne 0) {
+            git status --short
+            Write-Error "Upstream merge conflicted. The personal branch was not changed."
+            exit 1
+          }
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "has_update=true"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "should_build=true"
+
+      - name: Set up .NET
+        if: steps.merge.outputs.should_build == 'true'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download Dalamud Latest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip -DestinationPath "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Restore NuGet Packages
+        if: steps.merge.outputs.should_build == 'true'
+        run: dotnet restore Gatherbuddy/Gatherbuddy.csproj
+
+      - name: Build Plugin
+        if: steps.merge.outputs.should_build == 'true'
+        run: dotnet build --no-restore -c Release Gatherbuddy/Gatherbuddy.csproj --output .\build
+
+      - name: Build raphael-cli
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/KonaeAkira/raphael-rs.git raphael-rs-temp
+          Set-Location raphael-rs-temp
+          cargo build --release --package raphael-cli
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to build raphael-cli."
+            exit 1
+          }
+          Copy-Item -Path ".\target\release\raphael-cli.exe" -Destination "..\build\raphael-cli.exe" -Force
+
+      - name: Push Verified Update
+        if: steps.merge.outputs.has_update == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
