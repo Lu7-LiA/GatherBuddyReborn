@@ -1,6 +1,15 @@
 # [![](https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/GBR_Icon.png)](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)
 
-**GatherBuddyReborn**
+**GatherBuddy Reborn + Crystal**
+
+> [!WARNING]
+> **非公式の個人改変版です。** このリポジトリは
+> [GatherBuddyReborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn) を個人用途向けに改変したものであり、
+> オリジナル版・公式配布版ではありません。この改変版に関するサポートを本家の開発者・コミュニティへ求めないでください。
+>
+> **This is an unofficial personal modification.** It is not an original or official release of
+> [GatherBuddyReborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn). The upstream maintainers and community
+> do not provide support for this modified build. Do not report issues specific to this fork to the upstream project.
 
 ![Github Latest Releases](https://img.shields.io/github/downloads/FFXIV-CombatReborn/GatherBuddyReborn/latest/total.svg?style=for-the-badge)
 ![Github All Releases](https://img.shields.io/github/downloads/FFXIV-CombatReborn/GatherBuddyReborn/total.svg?style=for-the-badge)
