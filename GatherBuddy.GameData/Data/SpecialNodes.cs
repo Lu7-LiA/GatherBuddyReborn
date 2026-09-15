@@ -121,7 +121,7 @@ public static class SpecialNodes
         if (territory == null)
             return Fail($"Territory {definition.TerritoryId} is not usable.", out error);
 
-        node  = GatheringNode.CreateSpecial(data, baseNode.Value, territory, item, worldPositions);
+        node  = GatheringNode.CreateSpecial(data, baseNode.Value, territory, item, worldPositions, definition.Name);
         error = string.Empty;
         return true;
     }

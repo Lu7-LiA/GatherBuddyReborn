@@ -10,7 +10,7 @@ namespace GatherBuddy.Classes;
 public partial class GatheringNode
 {
     internal static GatheringNode CreateSpecial(GameData data, GatheringPointBase baseNode, Territory territory,
-        Gatherable item, IReadOnlyDictionary<uint, List<Vector3>> worldPositions)
+        Gatherable item, IReadOnlyDictionary<uint, List<Vector3>> worldPositions, string? name)
     {
         var positions = worldPositions.Values.SelectMany(list => list).ToArray();
         var x          = positions.Average(position => position.X);
@@ -23,17 +23,18 @@ public partial class GatheringNode
         var radius = data.DataManager.GetExcelSheet<ExportedGatheringPoint>()
             .GetRowOrDefault(baseNode.RowId)?.Radius ?? 10;
 
-        var node = new GatheringNode(baseNode, territory, item, worldPositions, mapX, mapY, aetheryte, radius);
+        var node = new GatheringNode(baseNode, territory, item, worldPositions, mapX, mapY, aetheryte, radius, name);
         node.AddNodeToItem(item);
         return node;
     }
 
     private GatheringNode(GatheringPointBase baseNode, Territory territory, Gatherable item,
-        IReadOnlyDictionary<uint, List<Vector3>> worldPositions, int mapX, int mapY, Aetheryte? aetheryte, ushort radius)
+        IReadOnlyDictionary<uint, List<Vector3>> worldPositions, int mapX, int mapY, Aetheryte? aetheryte, ushort radius,
+        string? name)
     {
         BaseNodeData     = baseNode;
         Territory        = territory;
-        Name             = territory.Name;
+        Name             = string.IsNullOrWhiteSpace(name) ? territory.Name : name.Trim();
         Items            = [item];
         NodeType         = Enums.NodeType.Regular;
         Times            = BitfieldUptime.AllHours;
