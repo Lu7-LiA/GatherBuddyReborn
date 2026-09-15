@@ -78,7 +78,8 @@ public class GameData
         OverriddenFish = Fishes.Values.Count(f => f.HasOverridenData);
         return true;
     }
-    public GameData(IDataManager gameData, Logger log, Dictionary<uint, List<Vector3>> worldCoordsDict, string overrideFile)
+    public GameData(IDataManager gameData, Logger log, Dictionary<uint, List<Vector3>> worldCoordsDict, string overrideFile,
+        string? specialNodesFile = null)
     {
         Log         = log;
         DataManager = gameData;
@@ -143,11 +144,13 @@ public class GameData
                 .GroupBy(row => row.GatheringPointBase.RowId)
                 .ToFrozenDictionary(group => group.Key, group => group.Select(g => g.RowId).Distinct().ToList());
 
-            GatheringNodes = DataManager.GetExcelSheet<GatheringPointBase>()
+            var gatheringNodes = DataManager.GetExcelSheet<GatheringPointBase>()
                 .Where(b => b.GatheringType.RowId < (int)Enums.GatheringType.Spearfishing)
                 .Select(b => new GatheringNode(this, tmpGatheringPoints, tmpGatheringItemPoint, b))
                 .Where(n => n.Territory.Id > 1 && n.Items.Count > 0)
-                .ToFrozenDictionary(n => n.Id, n => n);
+                .ToDictionary(n => n.Id, n => n);
+            SpecialNodes.Apply(this, gatheringNodes, specialNodesFile);
+            GatheringNodes = gatheringNodes.ToFrozenDictionary();
             Log.Verbose("Collected {NumGatheringNodes} different gathering nodes", GatheringNodes.Count);
             if (GatheringNodes.Count is 0)
                 throw new Exception("Could not fetch any gathering nodes, this is certainly an error, terminating.");

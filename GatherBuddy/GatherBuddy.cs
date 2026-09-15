@@ -120,7 +120,8 @@ public partial class GatherBuddy : IDalamudPlugin
             Backup.CreateAutomaticBackup(Log, pluginInterface.ConfigDirectory, GatherBuddyBackupFiles());
             Config   = Configuration.Load();
             Language = Dalamud.ClientState.ClientLanguage;
-            GameData = new GameData(Dalamud.GameData, Log, WorldData.WorldLocationsByNodeId, "fish_overrides.json");
+            GameData = new GameData(Dalamud.GameData, Log, WorldData.WorldLocationsByNodeId, "fish_overrides.json",
+                Path.Combine(pluginInterface.ConfigDirectory.FullName, SpecialNodes.FileName));
             Time     = new SeTime();
 
             WaymarkManager = new WaymarkManager();
