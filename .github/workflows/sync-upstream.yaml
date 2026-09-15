@@ -151,34 +151,8 @@ jobs:
           New-Item -ItemType Directory -Path ".\artifacts" -Force | Out-Null
           Compress-Archive -Path ".\build\*" -DestinationPath ".\artifacts\GatherBuddyReborn.zip" -Force
 
-      - name: Generate Custom Repository Manifest
-        if: steps.merge.outputs.should_build == 'true'
-        shell: pwsh
-        run: |
-          $tag = "${{ steps.version.outputs.release_tag }}"
-          $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/GatherBuddyReborn.zip"
-          .\.github\scripts\New-PluginMaster.ps1 `
-            -ManifestPath ".\build\GatherBuddyReborn.json" `
-            -OutputPath ".\pluginmaster.json" `
-            -DownloadUrl $downloadUrl
-
-          $repository = Get-Content -LiteralPath ".\pluginmaster.json" -Raw | ConvertFrom-Json
-          if ($repository.Count -ne 1 -or $repository[0].AssemblyVersion -ne "${{ steps.version.outputs.release_version }}") {
-            throw "pluginmaster.json validation failed."
-          }
-
-      - name: Commit Repository Manifest
-        if: steps.merge.outputs.should_build == 'true'
-        shell: pwsh
-        run: |
-          git add pluginmaster.json
-          git diff --cached --quiet
-          if ($LASTEXITCODE -ne 0) {
-            git commit -m "Publish crystal build ${{ steps.version.outputs.release_version }}"
-          }
-
-      - name: Push Verified Update
-        if: steps.merge.outputs.should_build == 'true'
+      - name: Push Verified Upstream Merge
+        if: steps.merge.outputs.has_update == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -205,3 +179,37 @@ jobs:
               --title $title `
               --notes $notes
           }
+
+      - name: Generate Custom Repository Manifest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/GatherBuddyReborn.zip"
+          .\.github\scripts\New-PluginMaster.ps1 `
+            -ManifestPath ".\build\GatherBuddyReborn.json" `
+            -OutputPath ".\pluginmaster.json" `
+            -DownloadUrl $downloadUrl
+
+          $repository = Get-Content -LiteralPath ".\pluginmaster.json" -Raw | ConvertFrom-Json
+          if ($repository.Count -ne 1 -or $repository[0].AssemblyVersion -ne "${{ steps.version.outputs.release_version }}") {
+            throw "pluginmaster.json validation failed."
+          }
+
+      - name: Commit Repository Manifest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          git add pluginmaster.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Publish crystal build ${{ steps.version.outputs.release_version }}"
+          }
+
+      - name: Push Repository Manifest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
