@@ -93,6 +93,14 @@ jobs:
           }
           Copy-Item -Path ".\target\release\raphael-cli.exe" -Destination "..\build\raphael-cli.exe" -Force
 
+      - name: Verify Push Access
+        if: steps.merge.outputs.has_update == 'false' && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push --dry-run "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
+
       - name: Push Verified Update
         if: steps.merge.outputs.has_update == 'true'
         shell: pwsh
