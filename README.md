@@ -27,17 +27,10 @@ GatherBuddyReborn is a community-made fork of the original GatherBuddy plugin fo
 **NOTE**: vnavmesh plugin is *required* for full automation. Please see the links section of this README for more information on vnavmesh.
   
 ## Installing
-- Enter `/xlsettings` in the chat window and go to the Experimental tab in the opening window.
-- **Skip below the DevPlugins section to the Custom Plugin Repositories section.**
-- Copy and paste the repo.json link into the first free text input field.
-```
-https://raw.githubusercontent.com/FFXIV-CombatReborn/CombatRebornRepo/main/pluginmaster.json
-```
-- Click on the + button and make sure the checkmark beside the new field is set afterwards.
-- **Click on the Save-icon in the bottom right.**
 
-Following these steps, you should be able to see all contained plugins in the Available Plugins tab in the Dalamud Plugin Installer.
-No Plugins will be installed, you have just made them available. You can now select which of these plugins you actually want to install.
+This personal fork is distributed through a separate Dalamud custom repository and is not submitted to the official plugin list.
+Its custom-repository URL is intentionally not published in this README. The upstream Combat Reborn repository installs the
+original build, not this modified build.
 
 ## Want to contribute?
 

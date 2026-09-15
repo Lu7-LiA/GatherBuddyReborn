@@ -1,4 +1,4 @@
-name: Sync Upstream
+name: Sync Upstream and Publish Crystal Build
 
 on:
   schedule:
@@ -25,6 +25,12 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Configure Git
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Merge Upstream
         id: merge
         shell: pwsh
@@ -45,8 +51,6 @@ jobs:
             exit 0
           }
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git merge --no-edit upstream/main
           if ($LASTEXITCODE -ne 0) {
             git status --short
@@ -58,6 +62,31 @@ jobs:
           git submodule update --init --recursive
           Add-Content -Path $env:GITHUB_OUTPUT -Value "has_update=true"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "should_build=true"
+
+      - name: Resolve Release Version
+        if: steps.merge.outputs.should_build == 'true'
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/FFXIV-CombatReborn/GatherBuddyReborn/releases/latest" -Headers $headers
+          $upstreamVersion = [Version]($latest.tag_name.TrimStart("v"))
+          $revision = $upstreamVersion.Revision + [int]$env:GITHUB_RUN_NUMBER
+          if ($revision -gt 65535) {
+            throw "The generated version revision exceeds the .NET version limit."
+          }
+
+          $releaseVersion = "{0}.{1}.{2}.{3}" -f $upstreamVersion.Major, $upstreamVersion.Minor, $upstreamVersion.Build, $revision
+          $releaseTag = "crystal-v$($releaseVersion.Replace('.', '-'))"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_version=$releaseVersion"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_tag=$releaseTag"
+          Write-Host "Upstream release: $upstreamVersion; crystal release: $releaseVersion"
 
       - name: Set up .NET
         if: steps.merge.outputs.should_build == 'true'
@@ -78,7 +107,14 @@ jobs:
 
       - name: Build Plugin
         if: steps.merge.outputs.should_build == 'true'
-        run: dotnet build --no-restore -c Release Gatherbuddy/Gatherbuddy.csproj --output .\build
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.release_version }}"
+          dotnet build --no-restore -c Release Gatherbuddy/Gatherbuddy.csproj --output .\build `
+            -p:AssemblyVersion=$version `
+            -p:FileVersion=$version `
+            -p:PackageVersion=$version `
+            -p:InformationalVersion=$version
 
       - name: Build raphael-cli
         if: steps.merge.outputs.should_build == 'true'
@@ -93,18 +129,79 @@ jobs:
           }
           Copy-Item -Path ".\target\release\raphael-cli.exe" -Destination "..\build\raphael-cli.exe" -Force
 
-      - name: Verify Push Access
-        if: steps.merge.outputs.has_update == 'false' && github.event_name == 'workflow_dispatch'
+      - name: Package Plugin
+        if: steps.merge.outputs.should_build == 'true'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git push --dry-run "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
+          $manifest = Get-Content -LiteralPath ".\build\GatherBuddyReborn.json" -Raw | ConvertFrom-Json
+          $expectedVersion = "${{ steps.version.outputs.release_version }}"
+          if ($manifest.AssemblyVersion -ne $expectedVersion) {
+            throw "Built manifest version '$($manifest.AssemblyVersion)' does not match '$expectedVersion'."
+          }
+          if ($manifest.InternalName -ne "GatherBuddyReborn") {
+            throw "The InternalName changed unexpectedly."
+          }
+          if (-not (Test-Path -LiteralPath ".\build\GatherBuddyReborn.dll")) {
+            throw "GatherBuddyReborn.dll was not produced."
+          }
+          if (-not (Test-Path -LiteralPath ".\build\raphael-cli.exe")) {
+            throw "raphael-cli.exe was not produced."
+          }
+
+          New-Item -ItemType Directory -Path ".\artifacts" -Force | Out-Null
+          Compress-Archive -Path ".\build\*" -DestinationPath ".\artifacts\GatherBuddyReborn.zip" -Force
+
+      - name: Generate Custom Repository Manifest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/GatherBuddyReborn.zip"
+          .\.github\scripts\New-PluginMaster.ps1 `
+            -ManifestPath ".\build\GatherBuddyReborn.json" `
+            -OutputPath ".\pluginmaster.json" `
+            -DownloadUrl $downloadUrl
+
+          $repository = Get-Content -LiteralPath ".\pluginmaster.json" -Raw | ConvertFrom-Json
+          if ($repository.Count -ne 1 -or $repository[0].AssemblyVersion -ne "${{ steps.version.outputs.release_version }}") {
+            throw "pluginmaster.json validation failed."
+          }
+
+      - name: Commit Repository Manifest
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          git add pluginmaster.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Publish crystal build ${{ steps.version.outputs.release_version }}"
+          }
 
       - name: Push Verified Update
-        if: steps.merge.outputs.has_update == 'true'
+        if: steps.merge.outputs.should_build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
+
+      - name: Publish GitHub Release
+        if: steps.merge.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $title = "GatherBuddy Reborn + Crystal ${{ steps.version.outputs.release_version }}"
+          $notes = "Automated personal build synchronized with upstream GatherBuddyReborn. This is an unofficial modified build and is not supported by the upstream project."
+
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag ".\artifacts\GatherBuddyReborn.zip" --clobber --repo "${{ github.repository }}"
+          } else {
+            gh release create $tag ".\artifacts\GatherBuddyReborn.zip" `
+              --repo "${{ github.repository }}" `
+              --target "personal/special-nodes" `
+              --title $title `
+              --notes $notes
+          }
