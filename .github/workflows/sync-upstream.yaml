@@ -76,17 +76,19 @@ jobs:
             "X-GitHub-Api-Version" = "2022-11-28"
           }
           $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/FFXIV-CombatReborn/GatherBuddyReborn/releases/latest" -Headers $headers
-          $upstreamVersion = [Version]($latest.tag_name.TrimStart("v"))
-          $revision = $upstreamVersion.Revision + [int]$env:GITHUB_RUN_NUMBER
-          if ($revision -gt 65535) {
-            throw "The generated version revision exceeds the .NET version limit."
-          }
+          $resolved = .\.github\scripts\Resolve-CrystalVersion.ps1 `
+            -UpstreamVersion $latest.tag_name `
+            -StatePath ".\.github\crystal-version.json" `
+            -RepositoryManifestPath ".\pluginmaster.json"
 
-          $releaseVersion = "{0}.{1}.{2}.{3}" -f $upstreamVersion.Major, $upstreamVersion.Minor, $upstreamVersion.Build, $revision
-          $releaseTag = "crystal-v$($releaseVersion.Replace('.', '-'))"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_version=$releaseVersion"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_tag=$releaseTag"
-          Write-Host "Upstream release: $upstreamVersion; crystal release: $releaseVersion"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "upstream_version=$($resolved.UpstreamVersion)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "crystal_revision=$($resolved.CrystalRevision)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_version=$($resolved.ReleaseVersion)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "friendly_version=$($resolved.FriendlyVersion)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release_tag=$($resolved.ReleaseTag)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "source_fingerprint=$($resolved.SourceFingerprint)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "should_publish=$($resolved.ShouldPublish.ToString().ToLowerInvariant())"
+          Write-Host "$($resolved.FriendlyVersion) -> $($resolved.ReleaseVersion) ($($resolved.Reason))"
 
       - name: Set up .NET
         if: steps.merge.outputs.should_build == 'true'
@@ -117,7 +119,7 @@ jobs:
             -p:InformationalVersion=$version
 
       - name: Build raphael-cli
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         run: |
           git clone --depth 1 https://github.com/KonaeAkira/raphael-rs.git raphael-rs-temp
@@ -130,7 +132,7 @@ jobs:
           Copy-Item -Path ".\target\release\raphael-cli.exe" -Destination "..\build\raphael-cli.exe" -Force
 
       - name: Package Plugin
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         run: |
           $manifest = Get-Content -LiteralPath ".\build\GatherBuddyReborn.json" -Raw | ConvertFrom-Json
@@ -148,6 +150,9 @@ jobs:
             throw "raphael-cli.exe was not produced."
           }
 
+          $manifest.Punchline = "${{ steps.version.outputs.friendly_version }} - Simplify gathering and fishing."
+          ConvertTo-Json -InputObject $manifest -Depth 10 | Set-Content -LiteralPath ".\build\GatherBuddyReborn.json" -Encoding utf8
+
           New-Item -ItemType Directory -Path ".\artifacts" -Force | Out-Null
           Compress-Archive -Path ".\build\*" -DestinationPath ".\artifacts\GatherBuddyReborn.zip" -Force
 
@@ -160,14 +165,14 @@ jobs:
           git push "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git" HEAD:personal/special-nodes
 
       - name: Publish GitHub Release
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.version.outputs.release_tag }}"
-          $title = "GatherBuddy Reborn + Crystal ${{ steps.version.outputs.release_version }}"
-          $notes = "Automated personal build synchronized with upstream GatherBuddyReborn. This is an unofficial modified build and is not supported by the upstream project."
+          $title = "GatherBuddy Reborn + Crystal - ${{ steps.version.outputs.friendly_version }}"
+          $notes = "${{ steps.version.outputs.friendly_version }}`n`nAutomated personal build synchronized with upstream GatherBuddyReborn. This is an unofficial modified build and is not supported by the upstream project."
 
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -181,7 +186,7 @@ jobs:
           }
 
       - name: Generate Custom Repository Manifest
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.release_tag }}"
@@ -189,7 +194,16 @@ jobs:
           .\.github\scripts\New-PluginMaster.ps1 `
             -ManifestPath ".\build\GatherBuddyReborn.json" `
             -OutputPath ".\pluginmaster.json" `
-            -DownloadUrl $downloadUrl
+            -DownloadUrl $downloadUrl `
+            -UpstreamVersion "${{ steps.version.outputs.upstream_version }}" `
+            -CrystalRevision ${{ steps.version.outputs.crystal_revision }}
+
+          $state = [ordered]@{
+            UpstreamVersion = "${{ steps.version.outputs.upstream_version }}"
+            CrystalRevision = [int]"${{ steps.version.outputs.crystal_revision }}"
+            SourceFingerprint = "${{ steps.version.outputs.source_fingerprint }}"
+          }
+          ConvertTo-Json -InputObject $state | Set-Content -LiteralPath ".\.github\crystal-version.json" -Encoding utf8
 
           $repository = Get-Content -LiteralPath ".\pluginmaster.json" -Raw | ConvertFrom-Json
           if ($repository.Count -ne 1 -or $repository[0].AssemblyVersion -ne "${{ steps.version.outputs.release_version }}") {
@@ -197,17 +211,17 @@ jobs:
           }
 
       - name: Commit Repository Manifest
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         run: |
-          git add pluginmaster.json
+          git add pluginmaster.json .github/crystal-version.json
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Publish crystal build ${{ steps.version.outputs.release_version }}"
+            git commit -m "Publish ${{ steps.version.outputs.friendly_version }}"
           }
 
       - name: Push Repository Manifest
-        if: steps.merge.outputs.should_build == 'true'
+        if: steps.version.outputs.should_publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

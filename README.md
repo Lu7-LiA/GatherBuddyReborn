@@ -32,6 +32,18 @@ This personal fork is distributed through a separate Dalamud custom repository a
 Its custom-repository URL is intentionally not published in this README. The upstream Combat Reborn repository installs the
 original build, not this modified build.
 
+## Versioning
+
+Releases show both the upstream GatherBuddyReborn version and this fork's revision, for example:
+
+```text
+GBR 7.5.5.3 + Crystal r01
+```
+
+The numeric Dalamud assembly version encodes the same information as `7.5.5.301`: upstream revision `3` plus Crystal revision
+`01`. The Crystal revision advances only when upstream or fork source content changes; rebuilding identical source does not
+create a new version.
+
 ## Want to contribute?
 
 - Create a fork
