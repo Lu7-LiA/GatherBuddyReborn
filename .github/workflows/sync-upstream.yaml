@@ -5,6 +5,11 @@ on:
     # 03:17 JST. Avoid the start of the hour, when scheduled runs are busiest.
     - cron: "17 18 * * *"
   workflow_dispatch:
+  push:
+    branches:
+      - personal/special-nodes
+    paths:
+      - .github/workflows/sync-upstream.yaml
 
 permissions:
   contents: write
@@ -37,6 +42,7 @@ jobs:
         run: |
           git remote add upstream https://github.com/FFXIV-CombatReborn/GatherBuddyReborn.git
           git fetch --no-tags upstream main
+          $personalHead = (git rev-parse HEAD).Trim()
 
           git merge-base --is-ancestor upstream/main HEAD
           if ($LASTEXITCODE -eq 0) {
@@ -55,6 +61,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             git status --short
             Write-Error "Upstream merge conflicted. The personal branch was not changed."
+            exit 1
+          }
+
+          # Workflows are owned by this personal repository. The built-in
+          # GitHub App token can push source changes, but it must not update
+          # files under .github/workflows without the separate Workflows
+          # repository permission.
+          $workflowChanges = @(git diff --name-only $personalHead HEAD -- .github/workflows)
+          if ($workflowChanges.Count -gt 0) {
+            Write-Host "Keeping personal workflow files: $($workflowChanges -join ', ')"
+            git restore --source=$personalHead --staged --worktree -- .github/workflows
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to restore the personal workflow files."
+              exit 1
+            }
+
+            git commit --amend --no-edit
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to amend the upstream merge after restoring workflows."
+              exit 1
+            }
+          }
+
+          $remainingWorkflowChanges = @(git diff --name-only $personalHead HEAD -- .github/workflows)
+          if ($remainingWorkflowChanges.Count -gt 0) {
+            Write-Error "The upstream merge still changes workflow files: $($remainingWorkflowChanges -join ', ')"
             exit 1
           }
 
